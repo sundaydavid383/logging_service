@@ -153,21 +153,24 @@ _TEMPLATES = [
 
 def upgrade() -> None:
     now = datetime.now(timezone.utc)
+    
+    # Grab the active database connection binding from Alembic context
+    bind = op.get_bind()
 
-    # 1. Insert Event Types securely using parameterized bindings
+    # 1. Insert Event Types securely using parameterized bindings executed via connection context
     for event_type, source_service, description in _EVENT_TYPES:
         stmt = sa.text("""
             INSERT INTO event_type_registry (event_type, source_service, description)
             VALUES (:event_type, :source_service, :description)
             ON CONFLICT (event_type) DO NOTHING
         """)
-        op.execute(stmt, {
+        bind.execute(stmt, {
             "event_type": event_type,
             "source_service": source_service,
             "description": description
         })
 
-    # 2. Insert Notification Templates securely using parameterized bindings
+    # 2. Insert Notification Templates securely using parameterized bindings executed via connection context
     for template_id, channel, subject_template, body_template in _TEMPLATES:
         stmt = sa.text("""
             INSERT INTO notification_templates
@@ -176,10 +179,10 @@ def upgrade() -> None:
                 (:template_id, :channel, :subject_template, :body_template, 1, TRUE, :created_at, :updated_at)
             ON CONFLICT (template_id) DO NOTHING
         """)
-        op.execute(stmt, {
+        bind.execute(stmt, {
             "template_id": template_id,
             "channel": channel,
-            "subject_template": subject_template,  # Seamlessly maps None to an SQL NULL
+            "subject_template": subject_template,
             "body_template": body_template,
             "created_at": now,
             "updated_at": now
@@ -187,11 +190,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    
     # Target and remove only the injected template rows during down-revisions
     for template_id, _, _, _ in _TEMPLATES:
         stmt = sa.text("DELETE FROM notification_templates WHERE template_id = :template_id")
-        op.execute(stmt, {"template_id": template_id})
+        bind.execute(stmt, {"template_id": template_id})
 
     # Clear out seeded registry configurations cleanly without destroying table DDL
     stmt = sa.text("TRUNCATE TABLE event_type_registry CASCADE")
-    op.execute(stmt)
+    bind.execute(stmt)

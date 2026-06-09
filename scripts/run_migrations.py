@@ -33,7 +33,7 @@ def get_alembic_config() -> Config:
         sys.exit(1)
         
     cfg = Config(str(ini_path))
-    cfg.set_main_option("sqlalchemy.url", settings.postgres_dsn_url)
+    cfg.set_main_option("sqlalchemy.url", settings.postgres_dsn)
     return cfg
 
 
@@ -54,7 +54,7 @@ def run_check() -> None:
     from alembic.script import ScriptDirectory
 
     print("[FDQ Migrations] Checking schema synchronization...")
-    engine = create_engine(settings.postgres_dsn_url)
+    engine = create_engine(settings.postgres_dsn)
     
     try:
         with engine.connect() as conn:

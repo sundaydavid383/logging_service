@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: str | None = None
+    celery_result_expires_seconds: int = 86400
 
     # Idempotency key TTL (seconds) — per spec: 60 s for activity logs
     idempotency_ttl_activity: int = 60
@@ -147,6 +148,13 @@ class Settings(BaseSettings):
     # Audit Trail Configuration
     # ------------------------------------------------------------------
     audit_hash_algorithm: str = "sha256"
+    
+    # Missing parameters required by celery_app.py Beat Schedule:
+    audit_integrity_check_hour: int = 2     # Runs at 2:00 AM
+    audit_integrity_check_day: int | str = 0
+    audit_integrity_check_days: int = 7
+    audit_security_alert_channel: str = "security-alerts"
+    jwt_clock_leeway_seconds: int = 5
 
     # ------------------------------------------------------------------
     # Application / Environment Context
@@ -187,14 +195,10 @@ class Settings(BaseSettings):
 
     @property
     def postgres_dsn(self) -> str:
-        """psycopg2-compatible connection DSN parameter block string."""
+        """SQLAlchemy / Alembic / psycopg2 compatible URL format."""
         return (
-            f"host={self.postgres_host} "
-            f"port={self.postgres_port} "
-            f"dbname={self.postgres_db} "
-            f"user={self.postgres_user} "
-            f"password={self.postgres_password} "
-            f"options='-c statement_timeout={self.postgres_statement_timeout_ms}'"
+            f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
     @property

@@ -20,6 +20,7 @@ Tasks:
 from __future__ import annotations
 
 import structlog
+from datetime import datetime, timezone, timedelta
 from celery import shared_task
 
 from fdq_commons.db.session import db_connection
@@ -90,7 +91,7 @@ def verify_audit_chain_integrity(self) -> dict:
     Re-verify the hash chain for all audit aggregates touched in the
     last 7 days (configurable via settings.audit_integrity_check_days).
     """
-    from datetime import datetime, timezone, timedelta
+    
 
     log.info("audit_chain_integrity_check_started")
 
@@ -215,7 +216,7 @@ def _handle_broken_chains(broken_aggregates: list[dict]) -> None:
     Per spec §11.2: log CRITICAL + send Teams security notification
     when a broken chain is detected.
     """
-    from datetime import datetime, timezone
+
 
     detected_at = datetime.now(timezone.utc).isoformat()
 

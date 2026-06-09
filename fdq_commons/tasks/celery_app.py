@@ -137,14 +137,12 @@ celery_app.conf.update(
 # ---------------------------------------------------------------------------
 # Autodiscover tasks from all service packages
 # ---------------------------------------------------------------------------
-celery_app.autodiscover_tasks(
-    packages=[
-        "fdq_commons.tasks",
-        "services.activity_logging",
-        "services.error_logging",
-        "services.audit_trail",
-        "services.notification_service",
-    ],
-    related_name="tasks",
-    force=True,
-)
+# Explicit imports — autodiscover only finds files named tasks.py
+# maintenance.py must be imported directly so its tasks register
+import fdq_commons.tasks.maintenance  # noqa: F401
+
+# Service tasks — uncomment each one as you build the service
+import services.activity_logging.tasks  # noqa: F401
+# import services.error_logging.tasks
+# import services.audit_trail.tasks
+# import services.notification_service.tasks
