@@ -208,8 +208,7 @@ async def list_activity_logs(
     from fdq_commons.models.pagination import PaginationParams
     pseudo_params = PaginationParams(
         page=page,
-        page_size=params.page_size,
-        max_page_size=settings.pagination_max_page_size_logs,
+        page_size=params.page_size
     )
     # Using explicit keyword args ensures compatibility with the common pagination builder
     return PaginatedResponse.build(data=data, pagination=pseudo_params, total=total)

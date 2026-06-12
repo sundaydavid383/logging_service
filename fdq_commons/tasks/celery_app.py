@@ -143,6 +143,6 @@ import fdq_commons.tasks.maintenance  # noqa: F401
 
 # Service tasks — uncomment each one as you build the service
 import services.activity_logging.tasks  # noqa: F401
-# import services.error_logging.tasks
-# import services.audit_trail.tasks
-# import services.notification_service.tasks
+# import services.error_logging.tasks  # noqa: F401
+# import services.audit_trail.tasks  # noqa: F401
+# import services.notification_service.tasks  # noqa: F401

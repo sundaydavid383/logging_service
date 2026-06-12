@@ -12,7 +12,6 @@ Key spec requirements implemented here:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
