@@ -131,9 +131,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Notifications & Suppression
     # ------------------------------------------------------------------
-    smtp_host: str = "localhost"
-    smtp_port: int = 25
-    smtp_use_tls: bool = False
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
     smtp_from_address: str = "noreply@fiducia.internal"
     smtp_username: str | None = None
     smtp_password: str | None = None

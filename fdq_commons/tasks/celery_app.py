@@ -82,23 +82,21 @@ celery_app.conf.update(
     ),
 
     # Hardened Task Routing using explicit string regex mapping to prevent wildcard drops
-    task_routes=[
-        {
-            re.compile(r"fdq_commons\.tasks\.maintenance\..*"): {
-                "queue": "fdq_maintenance"
-            },
-            re.compile(r"services\.notification_service\.tasks\..*"): {
-                "queue": "fdq_notifications"
-            },
-            re.compile(r"services\.activity_logging\.tasks\..*"): {
-                "queue": "fdq_logging"
-            },
-            re.compile(r"services\.error_logging\.tasks\..*"): {
-                "queue": "fdq_logging"
-            },
-        }
-    ],
-
+   # Hardened Task Routing using explicit string glob patterns
+    task_routes={
+        "fdq_commons.tasks.maintenance.*": {
+            "queue": "fdq_maintenance"
+        },
+        "services.notification_service.tasks.*": {
+            "queue": "fdq_notifications"
+        },
+        "services.activity_logging.tasks.*": {
+            "queue": "fdq_logging"
+        },
+        "services.error_logging.tasks.*": {
+            "queue": "fdq_logging"
+        },
+    },
     # ---------------------------------------------------------------------------
     # Celery Beat Schedule — replaces pg_cron (no Dockerfile change needed)
     # ---------------------------------------------------------------------------
@@ -145,4 +143,4 @@ import fdq_commons.tasks.maintenance  # noqa: F401
 import services.activity_logging.tasks  # noqa: F401
 # import services.error_logging.tasks  # noqa: F401
 # import services.audit_trail.tasks  # noqa: F401
-# import services.notification_service.tasks  # noqa: F401
+import services.notification_service.tasks  # noqa: F401

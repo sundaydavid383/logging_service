@@ -10,7 +10,7 @@ token = jwt.encode(
         "sub": "00000000-0000-0000-0000-000000000001",
         "iat": now,
         "exp": now + 3600,
-        "scope": "logs:write logs:read audit:append audit:read audit:verify",
+        "scope": "logs:write logs:read audit:append audit:read audit:verify notifications:configure notifications:read notifications:send",
         "role": "system_admin",
     },
     private_key,

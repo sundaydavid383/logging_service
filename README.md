@@ -43,9 +43,10 @@ celery -A fdq_commons.tasks.celery_app worker --pool=solo --loglevel=info -Q fdq
 celery -A fdq_commons.tasks.celery_app beat --loglevel=info
 
 # Terminal 4 — a service
-uvicorn services.activity_logging.main:app --port 8001 --reload
-uvicorn services.error_logging.main:app    --port 8002 --reload
-uvicorn services.audit_trail.main:app      --port 8003 --reload
+uvicorn services.activity_logging.main:app    --port 8001 --reload
+uvicorn services.error_logging.main:app       --port 8002 --reload
+uvicorn services.audit_trail.main:app         --port 8003 --reload
+uvicorn services.notification_service.main:app --port 8004 --reload
 ```
 
 RS256 key pair for local dev:
@@ -68,7 +69,7 @@ API Gateway (Kong/NGINX)
         ├── activity_logging :8001  ✅ tested
         ├── error_logging    :8002  ✅ tested
         ├── audit_trail      :8003  ✅ tested
-        └── notification     :8004  ⏳ pending
+        └── notification     :8004  ✅ tested
               │
               └── fdq_commons (shared: auth, errors, pagination, db, cache)
                     │
@@ -137,8 +138,64 @@ Materialized view `activity_logs_summary` refreshed `CONCURRENTLY` every 15 min 
 **Activity Logging (8001)** — `POST/GET /api/v1/activity-logs/`, `GET .../summary`, `GET .../{id}`
 **Error Logging (8002)** — `POST/GET /api/v1/error-logs/`, `PATCH .../{id}/status`, `GET .../stats` — dedup confirmed (`deduplicated: true`, `recurrence_count` increments)
 **Audit Trail (8003)** — `POST/GET /api/v1/audit-events/`, `GET .../{id}`, `GET .../entity/{type}/{id}`, `POST .../verify` — hash chaining, idempotency replay, and chain verification (`valid: true`) all confirmed
-
 ---
+
+## Testing notfication service
+Test 1 — Direct email
+POST http://localhost:8004/api/v1/notifications/email
+{
+  "notification_id": "11111111-0001-0001-0001-000000000001",
+  "to": ["your-real-email@gmail.com"],
+  "subject": "FDQ Test — Direct Email",
+  "html_body": "<h2>FDQ Notification Service</h2><p>Test email from Fiducia DQMS.</p>",
+  "text_body": "FDQ Notification Service — test email."
+}
+Expect 202, then check your inbox.
+
+POST http://localhost:8004/api/v1/notifications/dispatch
+Authorization: Bearer <token>
+Content-Type: application/json
+{
+  "notification_id": "22222222-0002-0002-0002-000000000002",
+  "channel": "EMAIL",
+  "recipient": "your-real-email@gmail.com",
+  "template_id": "scan_completed_email",
+  "template_data": {
+    "scan_id": "SCAN-001",
+    "issue_count": 42,
+    "severity": "WARNING",
+    "completed_at": "2026-06-14T10:00:00Z"
+  },
+  "priority": "HIGH",
+  "suppress_within_seconds": 0
+}
+
+
+GET http://localhost:8004/api/v1/notifications/22222222-0002-0002-0002-000000000002/status
+Authorization: Bearer <token>
+it is use to get the status of a notification
+
+POST http://localhost:8004/api/v1/notifications/dispatch
+Authorization: Bearer <token>
+Content-Type: application/json
+{
+  "notification_id": "33333333-0003-0003-0003-000000000003",
+  "channel": "EMAIL",
+  "recipient": "your-real-email@gmail.com",
+  "template_id": "scan_completed_email",
+  "template_data": {
+    "scan_id": "SCAN-002",
+    "issue_count": 5,
+    "severity": "INFO",
+    "completed_at": "2026-06-14T10:05:00Z"
+  },
+  "suppress_within_seconds": 300
+}
+Send it once → should be DELIVERED. Send it again immediately with a different notification_id but same template_id/recipient → should be SUPPRESSED
+
+
+GET http://localhost:8004/api/v1/notifications/history
+Authorization: Bearer <token>
 
 ## Auth Scopes
 
