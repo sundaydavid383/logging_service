@@ -31,12 +31,19 @@ class DeviceInfo(BaseModel):
 
 class EventPayload(BaseModel):
     """
-    payload = { before: {}, after: {}, diff: {} }  — spec §5.3.1
-    diff is optional but recommended.
+    Suggested shape for state-change events: { before: {}, after: {}, diff: {} }
+    (spec §5.3.1). All three are optional — not every audit event is a
+    before/after state change (e.g. USER_RECORD_EXPORT, RULE_ACTIVATED).
+
+    extra="allow" means any additional caller-supplied keys (exported_fields,
+    reason, etc.) are preserved as-is instead of being silently dropped.
+    The hash chain covers the payload exactly as received either way.
     """
-    before: dict[str, Any] = Field(default_factory=dict)
-    after:  dict[str, Any] = Field(default_factory=dict)
+    before: dict[str, Any] | None = None
+    after:  dict[str, Any] | None = None
     diff:   dict[str, Any] | None = None
+
+    model_config = {"extra": "allow"}
 
 
 # ---------------------------------------------------------------------------
@@ -136,3 +143,22 @@ class ChainVerifyResponse(BaseModel):
     last_sequence:        int | None
     broken_at_sequence:   int | None
     verification_timestamp: datetime
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/audit-events/verify-all — full database verification (spec §11.2)
+# Async — triggers the scheduled weekly job on demand, returns a task_id
+# ---------------------------------------------------------------------------
+
+class FullChainVerifyResponse(BaseModel):
+    task_id:    str
+    status:     str
+    message:    str
+
+
+class FullChainVerifyStatusResponse(BaseModel):
+    task_id:            str
+    status:              str   # PENDING | STARTED | SUCCESS | FAILURE
+    aggregates_checked:  int | None = None
+    broken_count:        int | None = None
+    broken_aggregates:   list[dict] | None = None

@@ -150,6 +150,28 @@ def list_error_logs(
         404: {"description": "Error log not found."},
     },
 )
+# ---------------------------------------------------------------------------
+# GET /api/v1/error-logs/{error_id}  (Individual Log Entry Details)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{error_id}",
+    response_model=ErrorLogRead,
+    summary="Retrieve a single error log entry by ID",
+    description="Fetches full debugging metadata and stack trace context for an investigation.",
+    responses={
+        200: {"description": "Detailed log record returned successfully."},
+        404: {"description": "Error log record matching this UUID does not exist."},
+    },
+)
+def get_error_log_by_id(
+    error_id: uuid.UUID,
+    claims: dict = Depends(require_scope("logs:read")),
+) -> ErrorLogRead:
+    svc = ErrorLoggingService()
+    record = svc.get_by_id(error_id)
+    return ErrorLogRead(**record.to_dict())
+
 def update_error_status(
     error_id: uuid.UUID,
     body:     ErrorLogStatusUpdate,

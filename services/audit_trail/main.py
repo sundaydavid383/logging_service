@@ -20,6 +20,7 @@ from fdq_commons.models.errors import register_exception_handlers
 from fdq_commons.middleware.health import health_router
 from fdq_commons.db.session import get_pool, close_pool
 from fdq_commons.db.redis_client import get_redis, close_redis
+from fdq_commons.tasks.celery_app import celery_app  # noqa: F401 — forces Celery app registration so verify-all uses the Redis broker, not AMQP defaults
 
 from .routes import router
 

@@ -34,6 +34,8 @@ from .schemas import (
     AuditEventRead,
     ChainVerifyRequest,
     ChainVerifyResponse,
+    FullChainVerifyResponse,
+    FullChainVerifyStatusResponse,
 )
 from .service import AuditTrailService
 
@@ -111,13 +113,91 @@ def list_audit_events(
         page_size=page_size,
     )
     data = [_to_read_model(r, claims) for r in records]
-    params = PaginationParams(page=page, page_size=page_size)
+    params = PaginationParams(page=page, page_size=page_size,
+                              max_page_size=settings.pagination_max_page_size_audit)
     return PaginatedResponse.build(data=data, params=params, total=total)
 
 
 # ---------------------------------------------------------------------------
+# POST /api/v1/audit-events/verify-all  (spec §11.2)
+# Full-database hash chain verification — async, for government/regulatory
+# on-demand audits. Triggers the same task Celery beat runs weekly, but
+# immediately instead of waiting for Sunday.
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/verify-all",
+    status_code=202,
+    response_model=FullChainVerifyResponse,
+    summary="Verify hash chain integrity across the ENTIRE database",
+    description=(
+        "Triggers a full audit chain integrity scan across all aggregates — "
+        "for regulatory/government-requested on-demand verification (spec §11.2). "
+        "Runs asynchronously via Celery since this can take minutes on a large "
+        "dataset. Returns a task_id — poll GET /verify-all/{task_id} for the result. "
+        "If any chain is found broken, a CRITICAL log and Teams security alert "
+        "are fired automatically."
+    ),
+)
+def verify_all_chains(
+    claims: dict = Depends(require_scope("audit:verify")),
+) -> FullChainVerifyResponse:
+    from fdq_commons.tasks.maintenance import verify_audit_chain_integrity
+    print("=== DEBUG CELERY CONF ===")
+    print("Broker URL:", verify_audit_chain_integrity.app.conf.broker_url)
+    print("All registered tasks:", verify_audit_chain_integrity.app.tasks.keys())
+    print("=========================")
+    result = verify_audit_chain_integrity.delay()
+
+    log.info("full_chain_verification_triggered", task_id=result.id,
+             triggered_by=claims.get("sub"))
+
+    return FullChainVerifyResponse(
+        task_id=result.id,
+        status="QUEUED",
+        message="Full database verification started. Poll /verify-all/{task_id} for the result.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/audit-events/verify-all/{task_id}  (spec §11.2)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/verify-all/{task_id}",
+    response_model=FullChainVerifyStatusResponse,
+    summary="Check status of a full-database verification run",
+)
+def get_verify_all_status(
+    task_id: str,
+    claims:  dict = Depends(require_scope("audit:verify")),
+) -> FullChainVerifyStatusResponse:
+    from fdq_commons.tasks.celery_app import celery_app
+
+    task = celery_app.AsyncResult(task_id)
+
+    if task.state == "PENDING":
+        return FullChainVerifyStatusResponse(task_id=task_id, status="PENDING")
+
+    if task.state == "FAILURE":
+        return FullChainVerifyStatusResponse(task_id=task_id, status="FAILURE")
+
+    if task.state == "SUCCESS":
+        result = task.result or {}
+        return FullChainVerifyStatusResponse(
+            task_id=task_id,
+            status="SUCCESS",
+            aggregates_checked=result.get("aggregates_checked"),
+            broken_count=result.get("broken_count"),
+            broken_aggregates=result.get("broken_aggregates"),
+        )
+
+    return FullChainVerifyStatusResponse(task_id=task_id, status=task.state)
+
+
+# ---------------------------------------------------------------------------
 # POST /api/v1/audit-events/verify  (spec §5.3.5)
-# Defined BEFORE /{event_id} so "verify" is not treated as a UUID
+# Single-aggregate, synchronous, on-demand verification
 # ---------------------------------------------------------------------------
 
 @router.post(
@@ -178,7 +258,8 @@ def get_entity_history(
         page_size=page_size,
     )
     data = [_to_read_model(r, claims) for r in records]
-    params = PaginationParams(page=page, page_size=page_size)
+    params = PaginationParams(page=page, page_size=page_size,
+                              max_page_size=settings.pagination_max_page_size_audit)
     return PaginatedResponse.build(data=data, params=params, total=total)
 
 

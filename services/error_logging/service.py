@@ -16,6 +16,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+import hashlib
 
 import structlog
 from psycopg2.extras import DictCursor
@@ -320,7 +321,32 @@ class ErrorLoggingService:
             )
             for r in rows
         ]
+    
+    # ------------------------------------------------------------------
+    # GET BY ID (Fixes the AttributeError)
+    # ------------------------------------------------------------------
+    def get_by_id(self, error_id: uuid.UUID) -> ErrorLogRecord:
+        """
+        Fetch a single error log entry by its UUID.
+        Raises 404 FDQException if the record is missing.
+        """
+        with db_connection() as conn:
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM error_logs 
+                    WHERE id = %(id)s
+                """, {"id": error_id})
+                row = cur.fetchone()
 
+        if not row:
+            raise FDQException(
+                status_code=404,
+                code=ErrorCode.NOT_FOUND,
+                message=f"Error log record '{error_id}' not found.",
+            )
+
+        # Parse the raw row into your domain model record layer
+        return ErrorLogRecord.from_rows([dict(row)])[0]
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

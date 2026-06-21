@@ -1,272 +1,202 @@
 # FDQ — Logging, Audit Trail & Notification Services
 
 > Fiducia DQMS | Cross-cutting infrastructure services
-> Spec: FDQ Technical Specification v1.0, May 2026
-> Status: **Phases 0–5 complete, tested. Phase 6 (Notification) next.**
+> Spec: FDQ Technical Specification v1.0
+> **Status: Phases 0–6 complete and tested (Teams webhook pending org access)**
 
 ---
 
-## Overview
+## 1. What This Is
 
-Implements four services that every other FDQ microservice depends on:
-`activity_logging` (8001) · `error_logging` (8002) · `audit_trail` (8003) · `notification_service` (8004, pending)
+Four services every other FDQ microservice depends on:
 
-Satisfies: `FR-SEC-05` `FR-STORE-02/03` `FR-VER-10` `FR-NOTIF-01/02/04/05/06` `FR-ETL-06` `FR-REM-14/17`
+| Service | Port | Purpose | Status |
+|---|---|---|---|
+| Activity Logging | 8001 | Operational audit trail | ✅ Tested |
+| Error Logging | 8002 | Exception capture + dedup | ✅ Tested |
+| Audit Trail | 8003 | Immutable hash-chained ledger | ✅ Tested |
+| Notification | 8004 | Email + Teams alerts | ✅ Email tested, Teams pending |
 
 ---
 
-## Stack
+## 2. Architecture
 
-| | |
+```
+API Gateway → validates JWT signature → forwards to service
+  ├── activity_logging :8001 (async writes via Celery)
+  ├── error_logging    :8002 (sync writes — authoritative record)
+  ├── audit_trail       :8003 (sync + pg_advisory_xact_lock)
+  └── notification      :8004 (async via Celery)
+        │
+        └── fdq_commons (shared auth, errors, pagination, db, cache)
+              ├── PostgreSQL (psycopg2, RLS enabled)
+              ├── Redis (Celery broker + idempotency cache)
+              └── Celery (workers + beat scheduler)
+```
+
+---
+
+## 3. Key Design Decisions
+
+| Decision | Why |
 |---|---|
-| API | FastAPI, Python 3.12 |
-| DB | PostgreSQL 16, psycopg2 (raw — no ORM) |
-| Queue | Celery 5.6 (`--pool=solo` on Windows) + Redis 7 |
-| Auth | JWT RS256 (PyJWT) — second-check only, gateway validates first |
-| Migrations | Alembic — raw SQL, no SQLAlchemy models |
-| Logging | structlog — JSON → ELK in production |
-| Validation | Pydantic v2 |
+| Activity logs: **async** | Spec §3.1 — fire-and-forget, must never block the caller |
+| Error logs: **sync** | Spec §4.1 — "authoritative record," must confirm write before responding |
+| Audit events: **sync + advisory lock** | Spec §5.3.1/§8.2 — prevents two writes racing on the same hash chain |
+| Notifications: **async** | Spec §6.1 — suppression logic runs inside the Celery task, not the caller |
+| No ORM | Raw psycopg2 — deterministic SQL for audit hash computation |
+| JWT is a second check | API Gateway validates signature; services re-verify scopes only |
 
 ---
 
-## Quick Start (4 terminals)
+## 4. Quick Start
 
 ```bash
 cp .env.template .env
-docker compose up -d                                  # postgres:5432, redis:6379
+docker compose up -d
 python scripts/run_migrations.py
 
-# Terminal 2 — worker (Windows requires --pool=solo)
+# Terminal 2
 celery -A fdq_commons.tasks.celery_app worker --pool=solo --loglevel=info -Q fdq_default,fdq_logging,fdq_notifications,fdq_maintenance
 
-# Terminal 3 — beat
+# Terminal 3
 celery -A fdq_commons.tasks.celery_app beat --loglevel=info
 
-# Terminal 4 — a service
-uvicorn services.activity_logging.main:app    --port 8001 --reload
-uvicorn services.error_logging.main:app       --port 8002 --reload
-uvicorn services.audit_trail.main:app         --port 8003 --reload
+# Terminal 4 — run any service
+uvicorn services.activity_logging.main:app --port 8001 --reload
+uvicorn services.error_logging.main:app    --port 8002 --reload
+uvicorn services.audit_trail.main:app      --port 8003 --reload
 uvicorn services.notification_service.main:app --port 8004 --reload
 ```
 
-RS256 key pair for local dev:
+**Generate a test token:**
 ```bash
-mkdir -p keys
-openssl genrsa -out keys/private.pem 2048
-openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+python -c "
+import jwt, time
+from pathlib import Path
+private_key = Path('keys/private.pem').read_text()
+now = int(time.time())
+token = jwt.encode({'sub':'00000000-0000-0000-0000-000000000001','iat':now,'exp':now+3600,
+'scope':'logs:write logs:read audit:append audit:read audit:verify notifications:send notifications:read notifications:configure',
+'role':'system_admin'}, private_key, algorithm='RS256')
+print(token)
+"
 ```
-
-> Production: keys mounted as Kubernetes Secrets, never on disk.
 
 ---
 
-## Architecture
+## 5. Database Schema
 
-```
-API Gateway (Kong/NGINX)
-  └── validates RS256 signature, forwards token + request
-        │
-        ├── activity_logging :8001  ✅ tested
-        ├── error_logging    :8002  ✅ tested
-        ├── audit_trail      :8003  ✅ tested
-        └── notification     :8004  ✅ tested
-              │
-              └── fdq_commons (shared: auth, errors, pagination, db, cache)
-                    │
-                    ├── PostgreSQL (psycopg2 pool, RLS enabled)
-                    ├── Redis      (Celery broker + idempotency cache)
-                    └── Celery     (async writes, beat scheduler)
-```
+| Table | Purpose |
+|---|---|
+| `activity_logs` | Operational actions, async writes |
+| `error_logs` | Exceptions, sync writes, deduplication |
+| `audit_events` | Immutable hash chain, sync + advisory lock |
+| `notification_logs` | Delivery record for every notification |
+| `notification_templates` | Jinja2 templates, version-controlled |
+| `notification_preferences` | Per-user alert settings |
 
-**Design decisions:**
-
-- **No ORM.** Raw psycopg2 throughout — deterministic, inspectable SQL for audit hash computation and dedup logic.
-- **Activity logs: async via Celery.** Fire-and-forget per spec §3.1 — "if the logging call fails, it must not fail the primary operation."
-- **Error logs: synchronous.** Spec §4.1 calls them "the authoritative record of system failures." No Celery — write must succeed or fail before responding.
-- **Audit events: synchronous + `pg_advisory_xact_lock`.** Spec §5.3.1/§8.2 mandates the hash chain computation runs inside a serialised DB transaction. Async would risk two events racing on `previous_event_hash` and forking the chain. Idempotency replay also requires the caller to get `sequence_number`/`event_hash` back immediately.
-- **Audit immutability at the trigger level.** `prevent_audit_mutation()` is a PostgreSQL trigger — cannot be bypassed by application code or DB access.
-- **JWT is a second check.** Gateway validates signature; services re-verify scopes. Services hold only the public key.
-- **One `.env`, one settings object.** `fdq_commons.config.settings` imported everywhere — nothing hardcoded.
+`prevent_audit_mutation()` PostgreSQL trigger blocks UPDATE/DELETE on `audit_events` — enforced at the database level, not just the API.
 
 ---
 
-## Project Structure
+## 6. Notification Templates — How They Work
+
+Templates live in `notification_templates`, seeded by `002_seed_data.py`. Each row has `subject_template` and `body_template` written in **Jinja2** syntax (e.g. `{{ scan_id }}`).
+
+**Why only PUT, never POST:**
+
+Templates are **pre-seeded** at migration time — every valid `template_id` already exists in the database before any service runs. There is intentionally no "create a new template" endpoint via the API. New templates are added through a migration (a deliberate, reviewed, version-controlled change), not on the fly by a caller. This matches spec §6.3.7: templates are **updated** (content changes, new version), never freely created by arbitrary API calls — that would let any service invent unreviewed, unaudited message content.
+
+`PUT /api/v1/notifications/templates/{template_id}` replaces the body and **increments the version** automatically. Pass `dry_run: true` with `sample_data` to preview the rendered output without saving — useful for testing wording changes before committing them.
+
+---
+
+## 7. Auth Scopes
+
+| Scope | Who |
+|---|---|
+| `logs:write` / `logs:read` | Internal services / Compliance, Admin |
+| `audit:append` / `audit:read` / `audit:verify` | Internal services / DGS, Compliance, Admin |
+| `notifications:send` | Internal services |
+| `notifications:read` / `notifications:configure` | Admin, Compliance / Admin only |
+
+---
+
+## 8. Known Pending Items
+
+- **Teams webhook** — code complete (`teams_sender.py`, `/teams` endpoint), blocked on org-tier Teams access. Free personal Teams doesn't support Incoming Webhooks; needs either a paid plan or Microsoft's free 90-day Developer Program sandbox.
+- **Phase 7** — full integration test (activity log → audit event → notification, end to end), Locust load testing, k8s deployment configs.
+
+---
+
+## 9. Verified Test Endpoints
+
+**Activity Logging (8001)**
+```
+POST /api/v1/activity-logs/          → 201, async write via Celery
+GET  /api/v1/activity-logs/summary   → materialized view, refreshed every 15 min
+GET  /api/v1/activity-logs/          → paginated list
+GET  /api/v1/activity-logs/{log_id}  → single record
+```
+
+**Error Logging (8002)**
+```
+POST  /api/v1/error-logs/                  → 201, sync write, dedup confirmed
+GET   /api/v1/error-logs/stats             → grouped by severity/service/error_code
+PATCH /api/v1/error-logs/{id}/status       → resolution workflow
+```
+
+**Audit Trail (8003)**
+```
+POST /api/v1/audit-events/                              → 201, hash chain + advisory lock
+GET  /api/v1/audit-events/entity/{type}/{id}             → full chronological history
+POST /api/v1/audit-events/verify                         → valid: true confirmed
+```
+
+**Notification Service (8004)**
+```
+POST /api/v1/notifications/email      → 202, real Gmail SMTP delivery confirmed
+POST /api/v1/notifications/dispatch   → 202, async via Celery, suppression tested
+GET  /api/v1/notifications/{id}/status
+GET  /api/v1/notifications/history/
+```
+
+All endpoints tested with real data via ThunderClient against live PostgreSQL + Redis + Celery. Idempotency, deduplication, hash chain integrity, and suppression logic all independently verified.
+
+---
+
+## 10. Project Structure
 
 ```
 fdq/
 ├── fdq_commons/
-│   ├── config.py               # All env vars — single source of truth
-│   ├── logging_setup.py        # structlog, JSON prod / pretty dev
-│   ├── models/                 # errors.py, pagination.py
-│   ├── middleware/              # jwt_auth, rate_limit_headers, request_context, health
-│   ├── utils/                   # ip_validator, sanitiser (PII masking)
-│   ├── db/                      # session (psycopg2 pool), base_model, redis_client
-│   └── tasks/                   # celery_app (4 queues + beat schedule), maintenance
+│   ├── config.py                  # All env vars — single source of truth
+│   ├── logging_setup.py
+│   ├── models/                    # errors.py, pagination.py
+│   ├── middleware/                 # jwt_auth, rate_limit_headers, request_context, health
+│   ├── utils/                      # ip_validator, sanitiser (PII masking)
+│   ├── db/                         # session (psycopg2 pool), base_model, redis_client
+│   ├── notifications/              # email_sender.py, teams_sender.py
+│   └── tasks/                      # celery_app, maintenance
 │
 ├── migrations/versions/
-│   ├── 001_baseline_schema.py   # 6 tables, indexes, RLS, triggers, mat view
-│   └── 002_seed_data.py         # event_type_registry, notification_templates
+│   ├── 001_baseline_schema.py
+│   └── 002_seed_data.py
 │
 ├── services/
-│   ├── activity_logging/        ✅ models, schemas, service, tasks, routes, main
-│   ├── error_logging/            ✅ models, schemas, service, routes, main (no tasks — sync)
-│   ├── audit_trail/               ✅ models, schemas, service, routes, main (no tasks — sync)
-│   └── notification_service/     ⏳ pending
+│   ├── activity_logging/           ✅
+│   ├── error_logging/              ✅
+│   ├── audit_trail/                ✅
+│   └── notification_service/       ✅
 │
-└── tests/commons/test_phase1_commons.py
+└── scripts/run_migrations.py
 ```
 
 ---
 
-## Database Schema
+## 11. Windows-Specific Notes
 
-| Table | Purpose | Notes |
-|---|---|---|
-| `activity_logs` | Operational audit trail | Async writes via Celery |
-| `error_logs` | Exceptions with deduplication | `ERROR_DEDUP_WINDOW_SECONDS` (default 300s); sync writes |
-| `audit_events` | Immutable hash-chained log | UPDATE/DELETE blocked at trigger level; sync writes with advisory lock |
-| `notification_logs` | Outbound delivery record | FK → audit_events |
-| `notification_templates` | Jinja2 templates per channel | Pending |
-| `notification_preferences` | Per-user alert settings | Pending |
-
-Materialized view `activity_logs_summary` refreshed `CONCURRENTLY` every 15 min via Celery beat.
-
----
-
-## Verified Endpoints
-
-**Activity Logging (8001)** — `POST/GET /api/v1/activity-logs/`, `GET .../summary`, `GET .../{id}`
-**Error Logging (8002)** — `POST/GET /api/v1/error-logs/`, `PATCH .../{id}/status`, `GET .../stats` — dedup confirmed (`deduplicated: true`, `recurrence_count` increments)
-**Audit Trail (8003)** — `POST/GET /api/v1/audit-events/`, `GET .../{id}`, `GET .../entity/{type}/{id}`, `POST .../verify` — hash chaining, idempotency replay, and chain verification (`valid: true`) all confirmed
----
-
-## Testing notfication service
-Test 1 — Direct email
-POST http://localhost:8004/api/v1/notifications/email
-{
-  "notification_id": "11111111-0001-0001-0001-000000000001",
-  "to": ["your-real-email@gmail.com"],
-  "subject": "FDQ Test — Direct Email",
-  "html_body": "<h2>FDQ Notification Service</h2><p>Test email from Fiducia DQMS.</p>",
-  "text_body": "FDQ Notification Service — test email."
-}
-Expect 202, then check your inbox.
-
-POST http://localhost:8004/api/v1/notifications/dispatch
-Authorization: Bearer <token>
-Content-Type: application/json
-{
-  "notification_id": "22222222-0002-0002-0002-000000000002",
-  "channel": "EMAIL",
-  "recipient": "your-real-email@gmail.com",
-  "template_id": "scan_completed_email",
-  "template_data": {
-    "scan_id": "SCAN-001",
-    "issue_count": 42,
-    "severity": "WARNING",
-    "completed_at": "2026-06-14T10:00:00Z"
-  },
-  "priority": "HIGH",
-  "suppress_within_seconds": 0
-}
-
-
-GET http://localhost:8004/api/v1/notifications/22222222-0002-0002-0002-000000000002/status
-Authorization: Bearer <token>
-it is use to get the status of a notification
-
-POST http://localhost:8004/api/v1/notifications/dispatch
-Authorization: Bearer <token>
-Content-Type: application/json
-{
-  "notification_id": "33333333-0003-0003-0003-000000000003",
-  "channel": "EMAIL",
-  "recipient": "your-real-email@gmail.com",
-  "template_id": "scan_completed_email",
-  "template_data": {
-    "scan_id": "SCAN-002",
-    "issue_count": 5,
-    "severity": "INFO",
-    "completed_at": "2026-06-14T10:05:00Z"
-  },
-  "suppress_within_seconds": 300
-}
-Send it once → should be DELIVERED. Send it again immediately with a different notification_id but same template_id/recipient → should be SUPPRESSED
-
-
-GET http://localhost:8004/api/v1/notifications/history
-Authorization: Bearer <token>
-
-## Auth Scopes
-
-| Scope | Assigned to |
-|---|---|
-| `logs:write` | All internal services |
-| `logs:read` | Data Analyst, Compliance Officer, System Admin |
-| `audit:append` | All internal services |
-| `audit:read` | DGS, Compliance Officer, System Admin |
-| `audit:verify` | System Admin, Compliance Officer |
-| `notifications:send` | All internal services |
-| `notifications:read` | System Admin, Compliance Officer |
-| `notifications:configure` | System Admin only |
-
----
-
-## API Conventions
-
-**Error response:**
-```json
-{"error": {"code": "INSUFFICIENT_SCOPE", "message": "...", "details": [], "trace_id": "...", "timestamp": "..."}}
-```
-
-**List response:**
-```json
-{"data": [...], "pagination": {"page": 1, "page_size": 50, "total": 4200, "total_pages": 84, "has_next": true}}
-```
-
-Idempotency via `idempotency_key` (audit) / `Idempotency-Key` header (activity). Rate limit headers on all responses per FR-REM-17.
-
----
-
-## Migrations
-
-```bash
-python scripts/run_migrations.py           # upgrade to head
-python scripts/run_migrations.py --check
-python scripts/run_migrations.py --history
-```
-
-`AUDIT_HASH_ALGORITHM` must not change post go-live — breaks all existing hash chains.
-
----
-
-## Windows Notes
-
-- Python 3.14 breaks Celery 5.6 — use **Python 3.12**
-- Celery worker requires `--pool=solo` on Windows (prefork pool causes `PermissionError`)
-- If `celerybeat-schedule*` files get corrupted after a PC restart, delete all `celerybeat-schedule*` files and restart beat
-
----
-
-## Progress
-
-| Phase | Scope | Status |
-|---|---|---|
-| 0 | Environment, Docker, project scaffold | ✅ Done |
-| 1 | `fdq_commons` — shared infrastructure | ✅ Done |
-| 2 | Migrations, schema, seed data, Celery beat | ✅ Done |
-| 3 | Activity Logging Service | ✅ Done, tested |
-| 4 | Error Logging Service | ✅ Done, tested |
-| 5 | Audit Trail Service | ✅ Done, tested |
-| 6 | Notification Service | ⏳ Next |
-| 7 | Integration tests, Locust, k8s deployment | ⏳ Pending |
-
----
-
-## Security
-
-- PII masking enforced at Pydantic serialisation — cannot be bypassed by returning a raw DB row
-- Audit immutability enforced at PostgreSQL trigger level
-- Free-text fields sanitised on input — log injection prevention
-- Stack traces never returned to callers — trace_id only, full detail to ELK
-- `SWAGGER_UI_ENABLED=false` required in production
+- Python 3.14 breaks Celery 5.6 — use **3.12**
+- Worker requires `--pool=solo` (prefork fails on Windows)
+- If `celerybeat-schedule*` corrupts after sleep/restart, delete all `celerybeat-schedule*` files and restart beat

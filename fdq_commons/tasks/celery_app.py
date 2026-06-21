@@ -29,18 +29,23 @@ from fdq_commons.config import settings
 # ---------------------------------------------------------------------------
 # Celery application instance
 # ---------------------------------------------------------------------------
-
-celery_app = Celery(
-    "fdq",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
-)
+if getattr(settings, "redis_url", None) is None:
+    redis_host = getattr(settings, "redis_host", "127.0.0.1") or "127.0.0.1"
+    redis_port = getattr(settings, "redis_port", 6379) or 6379
+    redis_db = getattr(settings, "redis_db", 0) or 0
+    computed_broker = f"redis://{redis_host}:{redis_port}/{redis_db}"
+else:
+    computed_broker = settings.redis_url 
+    
+celery_app = Celery("fdq")
 
 # ---------------------------------------------------------------------------
 # Configuration — all values from settings
 # ---------------------------------------------------------------------------
-
 celery_app.conf.update(
+    broker_url=computed_broker,        #  Use the computed variable here
+    result_backend=computed_broker,    #  Use the computed variable here
+    
     # Serialization
     task_serializer="json",
     result_serializer="json",
@@ -81,8 +86,6 @@ celery_app.conf.update(
         ),
     ),
 
-    # Hardened Task Routing using explicit string regex mapping to prevent wildcard drops
-   # Hardened Task Routing using explicit string glob patterns
     task_routes={
         "fdq_commons.tasks.maintenance.*": {
             "queue": "fdq_maintenance"
@@ -97,22 +100,13 @@ celery_app.conf.update(
             "queue": "fdq_logging"
         },
     },
-    # ---------------------------------------------------------------------------
-    # Celery Beat Schedule — replaces pg_cron (no Dockerfile change needed)
-    # ---------------------------------------------------------------------------
+
     beat_schedule={
-        # Refresh materialized view every 15 minutes — spec §3.3.4
-        # "Back it with a materialised view refreshed every 15 minutes
-        #  to meet the NFR 20.1 response time requirement."
         "refresh-activity-summary-view": {
             "task": "fdq_commons.tasks.maintenance.refresh_activity_summary",
-            "schedule": crontab(minute="*/15"),          # every 15 minutes
+            "schedule": crontab(minute="*/15"),
             "options": {"queue": "fdq_maintenance"},
         },
-
-        # Weekly audit chain integrity verification — spec §11.2
-        # "Schedule integrity verification as a weekly automated job
-        #  covering the previous 7 days of audit events."
         "weekly-audit-chain-verify": {
             "task": "fdq_commons.tasks.maintenance.verify_audit_chain_integrity",
             "schedule": crontab(
@@ -122,8 +116,6 @@ celery_app.conf.update(
             ),
             "options": {"queue": "fdq_maintenance"},
         },
-
-        # Heartbeat — proves the beat scheduler is alive (every 5 minutes)
         "beat-heartbeat": {
             "task": "fdq_commons.tasks.maintenance.beat_heartbeat",
             "schedule": crontab(minute="*/5"),
@@ -131,7 +123,6 @@ celery_app.conf.update(
         },
     },
 )
-
 # ---------------------------------------------------------------------------
 # Autodiscover tasks from all service packages
 # ---------------------------------------------------------------------------

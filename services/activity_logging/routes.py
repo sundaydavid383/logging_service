@@ -78,29 +78,37 @@ async def record_activity_log(
     body:              ActivityLogCreate,
     idempotency_key:  Optional[str] = Header(None, alias="Idempotency-Key"),
     claims:           dict          = Depends(require_scope("logs:write")),
+    svc:              ActivityLoggingService = Depends(get_activity_service), # Added dependency here
 ) -> ActivityLogResponse:
     """
-    Fire-and-forget: validates the payload, checks idempotency, dispatches
-    a Celery task, and returns immediately. The DB write happens async.
+    Validates the payload against the DB registry synchronously, checks idempotency, 
+    dispatches a Celery task, and returns immediately.
     """
     correlation_id = get_correlation_id(request)
 
-    # 1. Idempotency check — 60s window per spec §3.3.1
+    # 1. NEW: Validate event_type synchronously against the DB registry before doing anything else
+    # This prevents un-registered events from getting into Celery
+    try:
+        event_type = body.event_type.upper()
+        svc._validate_event_type(event_type, raise_as_fatal=False)
+    except FDQException as exc:
+        # Re-raise the exact 422 exception to the user
+        raise exc
+
+    # 2. Idempotency check — 60s window per spec §3.3.1
     if idempotency_key:
         cached = activity_idempotency_cache.get(idempotency_key)
         if cached:
             log.info("activity_log_idempotency_hit", idempotency_key=idempotency_key)
             return ActivityLogResponse(**cached)
 
-    # 2. Bind a single deterministic ID to synchronize API layer and DB worker
+    # 3. Bind a single deterministic ID to synchronize API layer and DB worker
     assigned_id = uuid.uuid4()
     
-    # mode="json" ensures all UUIDs and datetimes turn into standard strings 
-    # so that the Celery broker (Redis) can serialize it without throwing exceptions.
     payload = body.model_dump(mode="json")
     payload["log_id"] = str(assigned_id) 
 
-    # 3. Dispatch async Celery task — never block on DB write
+    # 4. Dispatch async Celery task — never block on DB write
     try:
         dispatch_activity_log(payload)
     except Exception as exc:
@@ -117,13 +125,12 @@ async def record_activity_log(
             trace_id=correlation_id,
         )
     
-
     result = ActivityLogResponse(
         log_id=assigned_id,
         created_at=datetime.now(timezone.utc),
     )
 
-    # 4. Cache idempotency result — 60s TTL per spec
+    # 5. Cache idempotency result — 60s TTL per spec
     if idempotency_key:
         activity_idempotency_cache.set(
             idempotency_key,
@@ -136,8 +143,6 @@ async def record_activity_log(
         correlation_id=correlation_id,
     )
     return result
-
-
 # ---------------------------------------------------------------------------
 # GET /api/v1/activity-logs/summary  (spec §3.3.4)
 # ---------------------------------------------------------------------------
@@ -211,7 +216,7 @@ async def list_activity_logs(
         page_size=params.page_size
     )
     # Using explicit keyword args ensures compatibility with the common pagination builder
-    return PaginatedResponse.build(data=data, pagination=pseudo_params, total=total)
+    return PaginatedResponse.build(data=data, params=pseudo_params, total=total)
 
 
 # ---------------------------------------------------------------------------
