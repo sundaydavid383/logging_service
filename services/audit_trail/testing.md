@@ -6,7 +6,7 @@ This section isolates the structural requirements from your code: Append-only ve
 Use this guide to test the integrity of the append-only log engine, verify cryptographic validation blocks, and evaluate role-based masking rules.
 
 🟢 Test 6: Append a Cryptographically Chained Audit Event
-Method & URL: POST http://localhost:8002/api/v1/audit-events/
+Method & URL: POST http://localhost:8003/api/v1/audit-events/
 
 Headers: * Authorization: Bearer <your_token>
 
@@ -16,9 +16,9 @@ JSON Request Body:
 
 JSON
 {
-  "idempotency_key": "c4d3b1a2-fa45-442d-b787-3328fe0598a1",
-  "event_type": "USER_RECORD_EXPORT",
-  "aggregate_type": "ACCOUNT_PROFILE",
+ "idempotency_key": "c4d3b1a2-fa45-442d-b787-3328fe0598a1",
+  "event_type": "SCAN_JOB_COMPLETED", 
+  "aggregate_type": "SCAN_JOB",
   "aggregate_id": "acc_88301fd2",
   "actor_user_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
   "actor_role": "compliance_officer",
@@ -40,7 +40,7 @@ What this endpoint does: It appends a secure, non-mutable ledger record tracking
 What to text your boss: > "This is our immutable audit trail logging endpoint. It calculates deterministic hashes using canonical JSON mapping rules on the fly, making sure that once an engineering or data security event is recorded, any attempts to modify history later will break our verification validation chains instantly."
 
 🟢 Test 7: Verify Idempotency Engine & Anti-Race Guards
-Method & URL: POST http://localhost:8002/api/v1/audit-events/
+Method & URL: POST http://localhost:8003/api/v1/audit-events/
 
 Headers: Authorization: Bearer <your_token>
 
@@ -51,7 +51,7 @@ What to look for: Look closely at the response payload and your backend terminal
 What to text your boss: > "The engine protects against network retry spam and multi-worker racing. If an upstream handler experiences a network stutter and resends the exact same event footprint within a 24-hour bracket, the server identifies the idempotency signature and safely replays the historical verification data smoothly."
 
 🟢 Test 8: Extract Chronological Data Lineage (Entity History)
-Method & URL: GET http://localhost:8002/api/v1/audit-events/entity/ACCOUNT_PROFILE/acc_88301fd2?page=1&page_size=10
+Method & URL: GET http://localhost:8003/api/v1/audit-events/entity/ACCOUNT_PROFILE/acc_88301fd2?page=1&page_size=10
 
 Headers: Authorization: Bearer <your_token>
 
@@ -87,7 +87,7 @@ What to look for: Look for a clean confirmation statement: {"valid": true, "even
 What to text your boss: > "This provides cryptographic verification on demand. It steps through a sequence segment, re-derives every structural hash block independent of stored information, and cross-checks them. If a database administrator or malicious agent tries to alter a record behind the scenes, this validation routine flags the broken block immediately."
 
 🔴 Test 10: The Immutability Block (Testing Rule 1 & PostgreSQL Triggers)
-Method & URL: PATCH or DELETE http://localhost:8002/api/v1/audit-events/PASTE_YOUR_COPIED_ID_HERE
+Method & URL: PATCH or DELETE http://localhost:8003/api/v1/audit-events/PASTE_YOUR_COPIED_ID_HERE
 
 Headers: Authorization: Bearer <your_admin_token>
 
@@ -96,7 +96,7 @@ What this endpoint does: This is a negative test asset. Because your code strict
 What to text your boss: > "We explicitly verified our append-only constraint. The microservice lacks any update or deletion routes entirely, returning structural HTTP 405 errors out of the box. Additionally, the relational schema level uses a native block trigger, so even a direct database modification attempt by a rogue actor fails instantly."
 
 🔴 Test 11: Field-Level PII Masking (Compliance Auditing)
-Method & URL: GET http://localhost:8002/api/v1/audit-events/PASTE_YOUR_COPIED_ID_HERE
+Method & URL: GET http://localhost:8003/api/v1/audit-events/PASTE_YOUR_COPIED_ID_HERE
 
 Run this test twice with different credentials:
 

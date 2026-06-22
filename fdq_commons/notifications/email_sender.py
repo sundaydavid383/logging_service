@@ -1,27 +1,3 @@
-"""
-fdq_commons/notifications/email_sender.py
---------------------------------------------
-Email delivery via raw SMTP (spec §1.3: "On-premise SMTP relay, no SaaS
-dependency"). Uses Python's built-in smtplib — no third-party email API.
-
-This module is the ONLY place that knows how email gets sent. If the
-provider ever changes (different SMTP relay, different auth method),
-only this file changes. Callers (Celery tasks, routes) never change.
-
-Function signature is the contract:
-    send_email(to, subject, html_body, text_body=None, cc=None) -> dict
-
-Usage:
-    from fdq_commons.notifications.email_sender import send_email
-
-    result = send_email(
-        to=["user@bank.ng"],
-        subject="FDQ | Scan Job Completed",
-        html_body="<h2>Scan complete</h2>...",
-        text_body="Scan complete...",
-    )
-    # result = {"provider_message_id": "<...>", "status": "SENT"}
-"""
 from __future__ import annotations
 
 import smtplib
@@ -47,7 +23,7 @@ def send_email(
     cc: list[str] | None = None,
 ) -> dict:
     """
-    Send an email via SMTP.
+    Send an email via SMTP with an automatic Port 465 SSL fallback if the primary connection fails.
 
     Args:
         to:        list of recipient email addresses
@@ -86,13 +62,34 @@ def send_email(
 
     all_recipients = list(to) + (cc or [])
 
-    try:
-        if settings.smtp_use_tls:
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30)
-            server.starttls()
-        else:
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30)
+    server = None
+    fallback_triggered = False
 
+    try:
+        # --- PRIMARY ATTEMPT ---
+        try:
+            log.debug("email_connect_attempt", host=settings.smtp_host, port=settings.smtp_port)
+            
+            if settings.smtp_use_tls:
+                server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15)
+                server.starttls()
+            else:
+                server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15)
+                
+        except OSError as primary_exc:
+            # If primary port (e.g., 587) is blocked, trigger Port 465 Fallback
+            log.warning(
+                "email_primary_connection_failed_trying_fallback",
+                host=settings.smtp_host,
+                port=settings.smtp_port,
+                fallback_port=465,
+                error=str(primary_exc)
+            )
+            fallback_triggered = True
+            # Port 465 requires SMTP_SSL instead of standard SMTP
+            server = smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=20)
+
+        # --- AUTHENTICATION & DELIVERY ---
         try:
             if settings.smtp_username and settings.smtp_password:
                 server.login(settings.smtp_username, settings.smtp_password)
@@ -106,6 +103,7 @@ def send_email(
             to=to,
             subject=subject,
             provider_message_id=message_id,
+            fallback_used=fallback_triggered
         )
         return {"provider_message_id": message_id, "status": "SENT"}
 
@@ -114,7 +112,7 @@ def send_email(
         raise EmailSendError(f"SMTP send failed: {exc}") from exc
 
     except OSError as exc:
-        # Connection-level errors (DNS, timeout, refused)
+        # Connection-level errors (if even the fallback connection fails)
         log.error("email_connection_failed", host=settings.smtp_host,
-                  port=settings.smtp_port, error=str(exc))
-        raise EmailSendError(f"SMTP connection failed: {exc}") from exc
+                  port=465 if fallback_triggered else settings.smtp_port, error=str(exc))
+        raise EmailSendError(f"SMTP connection completely failed: {exc}") from exc

@@ -16,21 +16,6 @@ depends_on = None
 
 def upgrade() -> None:
 
-    # ------------------------------------------------------------------
-    # 0. ROLE BOOTSTRAPPING & EXTENSION CONFIGURATION
-    # fdq_user is created securely by Docker infrastructure on startup.
-    # fdq_readonly is custom internal reporting infrastructure and is handled here.
-    # ------------------------------------------------------------------
-    op.execute("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fdq_readonly') THEN
-                CREATE ROLE fdq_readonly;
-            END IF;
-        END
-        $$
-    """)
-
     # Ensure crypto capabilities exist for explicit unique token tasks if required
     op.execute("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 
