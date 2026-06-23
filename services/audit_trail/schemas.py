@@ -76,8 +76,7 @@ class AuditEventCreate(BaseModel):
     @field_validator("aggregate_type")
     @classmethod
     def _validate_aggregate_type(cls, v: str) -> str:
-        allowed = {"CUSTOMER_RECORD", "SCAN_JOB", "RULE", "USER", "ETL_JOB",
-                   "NOTIFICATION_TEMPLATE"}
+        allowed = {"CUSTOMER_RECORD", "SCAN_JOB", "RULE", "USER", "ETL_JOB", "NOTIFICATION_TEMPLATE"}
         v = v.strip().upper()
         if v not in allowed:
             raise ValueError(f"aggregate_type must be one of {allowed}")
