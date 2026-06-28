@@ -79,8 +79,7 @@ class ActivityLogRecord(BaseRecord):
 
     def to_dict(self) -> dict[str, Any]:
         """
-        Standard serializable format for matching FastAPI response schema 
-        instantiation blocks cleanly.
+        Standard serializable format for matching service response schema instantiation blocks cleanly.
         """
         return {
             "log_id": self.id,  # Maps directly to the 'log_id' expected by ActivityLogRead/Response

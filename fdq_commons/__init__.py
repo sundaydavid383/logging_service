@@ -27,7 +27,7 @@ Public API surface (import from these paths in service code):
         from fdq_commons.middleware.rate_limit_headers import RateLimitHeaderMiddleware
 
     Request context:
-        from fdq_commons.middleware.request_context import RequestContextMiddleware
+        from fdq_commons.middleware.django_request_context import DjangoRequestContextMiddleware
 
     Health checks:
         from fdq_commons.middleware.health import health_router

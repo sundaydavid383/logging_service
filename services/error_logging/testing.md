@@ -1,3 +1,5 @@
+Django migration note: the service now runs through Django at the same /api/v1/error-logs/ routes and is started with manage.py in the project root.
+
 🔴 Test 1: Fire a Critical Incident (The Ingestion Engine)
 Method & URL: POST http://localhost:8002/api/v1/error-logs/
 

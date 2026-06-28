@@ -110,7 +110,7 @@ def db_connection() -> Generator[psycopg2.extensions.connection, None, None]:
 
 def get_db_conn() -> Generator[psycopg2.extensions.connection, None, None]:
     """
-    FastAPI dependency providing a database connection for a single request.
+    Helper providing a database connection for a single request.
     Identical business logic execution as db_connection context manager.
     """
     pool = get_pool()

@@ -110,7 +110,8 @@ Windows service OR CLI
 2. Redis (Memurai)
 memurai-cli
 3. Backend services
-uvicorn app.main:app --reload
+python manage.py runserver 0.0.0.0:8001  # run the Django project; services are mounted under their app URLs
+
 🧪 5. Final System Verification
 PostgreSQL check
 psql -U postgres

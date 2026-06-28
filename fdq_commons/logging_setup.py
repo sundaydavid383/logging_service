@@ -74,8 +74,7 @@ def configure_logging(
     """
     Configure structlog and the standard library root logger.
 
-    Call once at application startup — in your FastAPI lifespan or at the
-    top of main.py. Calling more than once is safe (idempotent).
+    Call once at application startup — in your Django AppConfig.ready() or WSGI entrypoint. Calling more than once is safe (idempotent).
 
     Args:
         log_level:  Override the log level from settings (useful in tests).
@@ -85,7 +84,7 @@ def configure_logging(
     use_json = force_json if force_json is not None else settings.is_production
 
     # -- Standard library logging → structlog bridge ----------------------
-    # Any third-party library that uses stdlib logging (uvicorn, psycopg2,
+    # Any third-party library that uses stdlib logging (web server, psycopg2,
     # celery, etc.) will emit structured logs via this bridge.
     logging.basicConfig(
         format="%(message)s",
@@ -93,7 +92,7 @@ def configure_logging(
         level=resolved_level,
     )
     # Silence overly verbose libraries at WARNING unless we are in DEBUG
-    _noisy = ["uvicorn.access", "httpx", "asyncio"]
+    _noisy = ["gunicorn.error", "httpx", "asyncio"]
     for name in _noisy:
         lvl = logging.DEBUG if resolved_level == "DEBUG" else logging.WARNING
         logging.getLogger(name).setLevel(lvl)
@@ -142,7 +141,7 @@ def bind_request_context(
     Bind values to the current async context so every subsequent log call
     in this request automatically includes them without explicit passing.
 
-    Call this inside your FastAPI middleware after extracting JWT claims.
+    Call this inside your Django middleware after extracting JWT claims.
 
     Example:
         bind_request_context(

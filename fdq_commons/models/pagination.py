@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Generic, TypeVar
 from uuid import UUID
 
-from fastapi import Query, HTTPException
+from typing import Optional
 from pydantic import BaseModel, Field
 
 from fdq_commons.config import settings
@@ -60,7 +60,7 @@ def _extract_record_id(record: Any) -> str | None:
 
 class PaginationParams:
     """
-    FastAPI dependency that parses and validates pagination query parameters.
+    Helper that parses and validates pagination query parameters.
 
     max_page_size lets each route enforce its own cap:
         PaginationParams(page=page, page_size=page_size,
@@ -69,20 +69,9 @@ class PaginationParams:
 
     def __init__(
         self,
-        page: int = Query(
-            default=1,
-            ge=1,
-            description="Page number (1-indexed).",
-        ),
-        page_size: int = Query(
-            default=settings.pagination_default_page_size,
-            ge=1,
-            description="Number of records per page.",
-        ),
-        after_id: UUID | None = Query(
-            default=None,
-            description="Cursor for cursor-based pagination.",
-        ),
+        page: int = 1,
+        page_size: int = settings.pagination_default_page_size,
+        after_id: UUID | None = None,
         max_page_size: int = settings.pagination_max_page_size_logs,
     ) -> None:
         # Clamp page_size to the configured maximum — never trust the caller
@@ -115,11 +104,11 @@ class AuditPaginationParams(PaginationParams):
 
     def __init__(
         self,
-        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
-        page_size: int = Query(default=settings.pagination_default_page_size, ge=1),
-        after_id: UUID | None = Query(default=None),
-        from_sequence: int | None = Query(default=None, ge=1, description="Starting sequence number."),
-        to_sequence: int | None = Query(default=None, ge=1, description="Ending sequence number."),
+        page: int = 1,
+        page_size: int = settings.pagination_default_page_size,
+        after_id: UUID | None = None,
+        from_sequence: int | None = None,
+        to_sequence: int | None = None,
     ) -> None:
         super().__init__(
             page=page,
@@ -130,10 +119,7 @@ class AuditPaginationParams(PaginationParams):
 
         if from_sequence is not None and to_sequence is not None:
             if from_sequence > to_sequence:
-                raise HTTPException(
-                    status_code=400,
-                    detail="'from_sequence' cannot be greater than 'to_sequence'.",
-                )
+                raise ValueError("'from_sequence' cannot be greater than 'to_sequence'.")
 
         self.from_sequence = from_sequence
         self.to_sequence = to_sequence

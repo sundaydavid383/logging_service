@@ -3,9 +3,7 @@ fdq_commons/models/errors.py
 -----------------------------
 Standard error response envelope for all FDQ services (spec §2.3).
 
-Every service returns errors in this exact shape. Never return a raw
-FastAPI HTTPException without wrapping it through these models — that
-would break the contract consumers depend on.
+Every service returns errors in this exact shape. Never return a raw framework HTTPException without wrapping it through these models — that would break the contract consumers depend on.
 """
 
 from __future__ import annotations
@@ -14,10 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from django.http import HttpRequest, JsonResponse
 from pydantic import BaseModel, Field
 
 from fdq_commons.utils.sanitiser import apply_pii_mask
@@ -26,25 +21,37 @@ from fdq_commons.utils.sanitiser import apply_pii_mask
 # ---------------------------------------------------------------------------
 # Helper to extract context trace IDs reliably
 # ---------------------------------------------------------------------------
-def _get_active_trace_id(request: Request | None) -> str:
+def _get_active_trace_id(request: HttpRequest | None) -> str:
     """
     Extract the active trace/correlation ID from request state or headers,
     falling back to a clean UUID if none exists.
     """
     if not request:
         return str(uuid4())
-        
-    # Check if a middleware has already assigned a tracking ID to the request state
-    state_trace = getattr(request.state, "correlation_id", None) or getattr(request.state, "trace_id", None)
-    if state_trace:
-        return str(state_trace)
-        
-    # Check incoming request headers
-    for header in ("x-correlation-id", "x-trace-id", "x-request-id"):
-        header_val = request.headers.get(header)
-        if header_val:
-            return header_val
-            
+
+    # Check for fdq_context set by Django middleware
+    try:
+        fdq_ctx = getattr(request, "fdq_context", None)
+        if isinstance(fdq_ctx, dict) and fdq_ctx.get("correlation_id"):
+            return str(fdq_ctx.get("correlation_id"))
+    except Exception:
+        pass
+
+    # Check HTTP headers via request.headers if available
+    headers = getattr(request, "headers", None)
+    if headers and hasattr(headers, "get"):
+        for header in ("x-correlation-id", "x-trace-id", "x-request-id"):
+            header_val = headers.get(header)
+            if header_val:
+                return header_val
+
+    # Fallback to Django META header keys
+    if hasattr(request, "META"):
+        for header in ("HTTP_X_CORRELATION_ID", "HTTP_X_TRACE_ID", "HTTP_X_REQUEST_ID"):
+            header_val = request.META.get(header)
+            if header_val:
+                return header_val
+
     return str(uuid4())
 
 
@@ -97,13 +104,13 @@ class ErrorEnvelope(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# FDQException — raise this instead of Starlette/FastAPI HTTPException
+# FDQException — raise this instead of framework HTTPException
 # ---------------------------------------------------------------------------
 
-class FDQException(StarletteHTTPException):
+class FDQException(Exception):
     """
     Standard platform exception carrying an airtight ErrorEnvelope payload.
-    Inherits from StarletteHTTPException for clean middleware interoperability.
+    Provides a framework-agnostic exception wrapper for consistent error envelopes.
     """
 
     def __init__(
@@ -115,14 +122,15 @@ class FDQException(StarletteHTTPException):
         trace_id: str | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
-        super().__init__(status_code=status_code, detail=message)
+        # Maintain Starlette-like attribute names for compatibility with existing code
+        self.status_code = status_code
         self.fdq_code = code
         self.fdq_message = message
         self.fdq_details = details or []
         self.fdq_trace_id = trace_id
         self.headers = headers
 
-    def to_envelope(self, fallback_request: Request | None = None) -> ErrorEnvelope:
+    def to_envelope(self, fallback_request: HttpRequest | None = None) -> ErrorEnvelope:
         effective_trace = self.fdq_trace_id or _get_active_trace_id(fallback_request)
         return ErrorEnvelope(
             error=ErrorBody(
@@ -138,18 +146,15 @@ class FDQException(StarletteHTTPException):
 # Convenience factory
 # ---------------------------------------------------------------------------
 
-def make_error_response(
+def make_django_error_response(
     status_code: int,
     code: str,
     message: str,
     details: list[ErrorDetail] | None = None,
     trace_id: str | None = None,
     headers: dict[str, str] | None = None,
-) -> JSONResponse:
-    """
-    Build a FastAPI JSONResponse with a serialized error envelope structure.
-    Uses model_dump(mode="json") to enforce Pydantic customization factories.
-    """
+) -> JsonResponse:
+    """Build a Django JsonResponse with the FDQ error envelope."""
     envelope = ErrorEnvelope(
         error=ErrorBody(
             code=code,
@@ -158,11 +163,11 @@ def make_error_response(
             trace_id=trace_id or str(uuid4()),
         )
     )
-    return JSONResponse(
-        status_code=status_code,
-        content=envelope.model_dump(mode="json"),
-        headers=headers,
-    )
+    resp = JsonResponse(envelope.model_dump(mode="json"), status=status_code)
+    if headers:
+        for k, v in headers.items():
+            resp[k] = v
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -208,55 +213,46 @@ class ErrorCode:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI exception handlers — registered globally
+# Django-compatible exception helpers
 # ---------------------------------------------------------------------------
 
-async def fdq_exception_handler(request: Request, exc: FDQException) -> JSONResponse:
-    """Handler for FDQException — returns the structured envelope securely."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=exc.to_envelope(fallback_request=request).model_dump(mode="json"),
+def fdq_exception_handler_django(request: HttpRequest | None, exc: FDQException) -> JsonResponse:
+    """Django-compatible handler for FDQException — returns JsonResponse."""
+    return make_django_error_response(
+        status_code=getattr(exc, "status_code", 500),
+        code=exc.fdq_code,
+        message=exc.fdq_message,
+        details=exc.fdq_details,
+        trace_id=exc.fdq_trace_id,
         headers=exc.headers,
     )
 
 
-async def validation_exception_handler(request: Request, exc: Any) -> JSONResponse:
+def validation_exception_handler_django(request: HttpRequest | None, exc: Any) -> JsonResponse:
     """
-    Handler for Pydantic v2 RequestValidationError.
-    Converts field errors into an ErrorDetail array with recursive PII scrubbing.
+    Convert validation errors into FDQ error envelope for Django.
     """
-    details = []
+    details: list[ErrorDetail] = []
     trace_id = _get_active_trace_id(request)
-    
+
     if hasattr(exc, "errors") and callable(exc.errors):
         for error in exc.errors():
             field_path = ".".join(str(loc) for loc in error.get("loc", []))
-            
-            # Extract raw error context input value
             raw_input = error.get("input")
             scrubbed_value = None
-            
             if raw_input is not None:
                 if isinstance(raw_input, dict):
                     scrubbed_value = apply_pii_mask(raw_input)
                 elif isinstance(raw_input, (str, int, float, bool)):
-                    # Guard simple value fields using field-name hints
                     field_lower = field_path.lower()
                     fake_payload = {field_lower: str(raw_input)}
                     masked_payload = apply_pii_mask(fake_payload)
                     scrubbed_value = masked_payload[field_lower] if masked_payload else "***"
                 else:
-                    scrubbed_value = "***"  # Safe default fallback for complex objects
-            
-            details.append(
-                ErrorDetail(
-                    field=field_path,
-                    issue=error.get("type", "invalid"),
-                    value=scrubbed_value,
-                )
-            )
-            
-    return make_error_response(
+                    scrubbed_value = "***"
+            details.append(ErrorDetail(field=field_path, issue=error.get("type", "invalid"), value=scrubbed_value))
+
+    return make_django_error_response(
         status_code=422,
         code=ErrorCode.VALIDATION_ERROR,
         message="Request validation failed. Check the 'details' array for field-level errors.",
@@ -265,50 +261,21 @@ async def validation_exception_handler(request: Request, exc: Any) -> JSONRespon
     )
 
 
-async def starlette_http_exception_handler(request: Request, exc: Any) -> JSONResponse:
-    """
-    Intercepts low-level Starlette exceptions (like malformed unparseable JSON inputs)
-    to enforce response structural standard consistency.
-    """
-    trace_id = _get_active_trace_id(request)
-    status_code = getattr(exc, "status_code", 400)
-    detail_msg = getattr(exc, "detail", "Malformed request content payload.")
-    headers = getattr(exc, "headers", None)
-    
-    code_mapping = {
-        400: ErrorCode.INVALID_JSON,
-        401: ErrorCode.UNAUTHORIZED,
-        403: ErrorCode.FORBIDDEN,
-        404: ErrorCode.NOT_FOUND,
-    }
-    error_code = code_mapping.get(status_code, ErrorCode.VALIDATION_ERROR)
-
-    return make_error_response(
-        status_code=status_code,
-        code=error_code,
-        message=detail_msg,
-        trace_id=trace_id,
-        headers=headers,
-    )
-
-
-async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Catch-all for unhandled exceptions.
-    Logs internally; returns a safe 500 without leaking stack traces.
-    """
+def generic_exception_handler_django(request: HttpRequest | None, exc: Exception) -> JsonResponse:
+    """Catch-all for unhandled exceptions in Django views/middleware."""
     import structlog
     trace_id = _get_active_trace_id(request)
-    
     log = structlog.get_logger()
+    # path may not exist on arbitrary objects
+    path = getattr(request, 'path', getattr(request, 'url', None))
     log.error(
         "unhandled_exception",
         trace_id=trace_id,
         exc_type=type(exc).__name__,
         exc_message=str(exc),
-        path=request.url.path,
+        path=path,
     )
-    return make_error_response(
+    return make_django_error_response(
         status_code=500,
         code=ErrorCode.INTERNAL_SERVER_ERROR,
         message="An unexpected error occurred. The incident has been logged.",
@@ -317,10 +284,5 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 
 def register_exception_handlers(app: Any) -> None:
-    """Register all FDQ exception handlers on a FastAPI application."""
-    from fastapi.exceptions import RequestValidationError
-
-    app.add_exception_handler(FDQException, fdq_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(StarletteHTTPException, starlette_http_exception_handler)
-    app.add_exception_handler(Exception, generic_exception_handler)
+    """No-op compatibility shim. Django apps register exceptions via middleware/views."""
+    return

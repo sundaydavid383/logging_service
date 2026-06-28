@@ -1,5 +1,7 @@
 Here is the testing suite extension for your testing.md file covering the Audit Trail & Cryptographic Chain service.
 
+Django migration note: these endpoints are now served via Django under the same /api/v1/ paths, using the project entrypoint manage.py and WSGI deployment rather than the previous ASGI deployment.
+
 This section isolates the structural requirements from your code: Append-only verification, Idempotency tracking (Step 2), Data Lineage (Step 3), and Cryptographic Forensics (Step 4).
 
 🛡️ Audit Trail & Cryptographic Chain Test Suite

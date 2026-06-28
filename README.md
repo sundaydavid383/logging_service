@@ -62,11 +62,11 @@ celery -A fdq_commons.tasks.celery_app worker --pool=solo --loglevel=info -Q fdq
 # Terminal 3
 celery -A fdq_commons.tasks.celery_app beat --loglevel=info
 
-# Terminal 4 — run any service
-uvicorn services.activity_logging.main:app --port 8001 --reload
-uvicorn services.error_logging.main:app    --port 8002 --reload
-uvicorn services.audit_trail.main:app      --port 8003 --reload
-uvicorn services.notification_service.main:app --port 8004 --reload
+# Terminal 4 — run any service (Django WSGI)
+python manage.py runserver 0.0.0.0:8001  # Activity Logging (8001)
+python manage.py runserver 0.0.0.0:8002  # Error Logging (8002)
+python manage.py runserver 0.0.0.0:8003  # Audit Trail (8003)
+python manage.py runserver 0.0.0.0:8004  # Notification Service (8004)
 ```
 
 **Generate a test token:**

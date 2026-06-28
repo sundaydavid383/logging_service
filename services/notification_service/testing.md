@@ -1,3 +1,5 @@
+Django migration note: notification endpoints now run under Django with the same /api/v1/notifications/ routes and can be exercised via manage.py or your WSGI host.
+
 Test 1 — Direct email
 POST http://localhost:8004/api/v1/notifications/email
 Authorization: Bearer <token>

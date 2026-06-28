@@ -11,13 +11,12 @@ from functools import lru_cache
 from typing import Any
 
 import jwt
-from fastapi import Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from fdq_commons.config import settings
 from fdq_commons.models.errors import ErrorCode, FDQException
 
-_bearer_scheme = HTTPBearer(auto_error=False)
+# Django-based flows use fdq_commons.middleware.django_jwt_auth for view decorators.
+_bearer_scheme = None
 
 
 # ---------------------------------------------------------------------------
@@ -146,49 +145,16 @@ def _check_scopes(claims: dict[str, Any], required_scopes: tuple[str, ...], requ
 
 
 # ---------------------------------------------------------------------------
-# Unique Hash Classes for perfect FastAPI Dependency Deduplication
+# Unique Hash Classes for dependency deduplication
 # ---------------------------------------------------------------------------
 
-class ScopeRequirementChecker:
-    """
-    Callable dependency class wrapping validation scopes.
-    Provides identical hashing signatures so FastAPI can run internal cache deduplication loops.
-    """
-    def __init__(self, scopes: tuple[str, ...], require_all: bool) -> None:
-        self.scopes = scopes
-        self.require_all = require_all
-
-    def __hash__(self) -> int:
-        return hash((self.scopes, self.require_all))
-
-    def __eq__(self, other: Any) -> bool:
-        return (
-            isinstance(other, ScopeRequirementChecker) 
-            and self.scopes == other.scopes 
-            and self.require_all == other.require_all
-        )
-
-    async def __call__(
-        self, credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme)
-    ) -> dict[str, Any]:
-        raw_token = _extract_token(credentials)
-        claims = verify_token(raw_token)
-        _check_scopes(claims, self.scopes, self.require_all)
-        return claims
+# FastAPI dependency helpers removed — use Django decorators in services.
+def require_scope(*scopes: str):
+    raise RuntimeError("Use fdq_commons.middleware.django_jwt_auth.require_scope for Django views")
 
 
-def require_scope(*scopes: str) -> ScopeRequirementChecker:
-    return ScopeRequirementChecker(scopes, require_all=True)
-
-
-def require_any_scope(*scopes: str) -> ScopeRequirementChecker:
-    return ScopeRequirementChecker(scopes, require_all=False)
-
-
-async def get_current_claims(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme)) -> dict[str, Any]:
-    """Verified claims utility dependency block bypassing scope limitations checks."""
-    raw_token = _extract_token(credentials)
-    return verify_token(raw_token)
+def require_any_scope(*scopes: str):
+    raise RuntimeError("Use fdq_commons.middleware.django_jwt_auth.require_any_scope for Django views")
 
 
 # ---------------------------------------------------------------------------

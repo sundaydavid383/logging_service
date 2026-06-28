@@ -1,0 +1,62 @@
+"""
+services/notification_service/apps.py
+------------------------------------------
+Django AppConfig for the Notification Service.
+
+Handles lifecycle initialization:
+- Startup: Initialize connection pools and Redis client
+- Shutdown: Clean up resources
+"""
+
+import logging
+import atexit
+
+from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
+
+
+class NotificationServiceConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'services.notification_service'
+    verbose_name = 'FDQ Notification Service'
+
+    def ready(self) -> None:
+        logger.info("Initializing Notification Service...")
+
+        from fdq_commons.logging_setup import configure_logging
+        configure_logging()
+        logger.info("Structured logging configured.")
+
+        from fdq_commons.db.session import get_pool
+        try:
+            pool = get_pool()
+            logger.info(
+                "PostgreSQL connection pool initialized: min=%d max=%d",
+                pool.minconn,
+                pool.maxconn,
+            )
+        except Exception as exc:
+            logger.error("Failed to initialize PostgreSQL pool: %s", exc)
+            raise
+
+        from fdq_commons.db.redis_client import get_redis, check_redis_health
+        try:
+            redis_client = get_redis()
+            health = check_redis_health()
+            logger.info("Redis client initialized: %s", health)
+        except Exception as exc:
+            logger.error("Failed to initialize Redis: %s", exc)
+            raise
+
+        from fdq_commons.db.session import close_pool
+        from fdq_commons.db.redis_client import close_redis
+
+        def shutdown_handler() -> None:
+            logger.info("Shutting down Notification Service...")
+            close_pool()
+            close_redis()
+            logger.info("Shutdown complete.")
+
+        atexit.register(shutdown_handler)
+        logger.info("Notification Service ready.")
