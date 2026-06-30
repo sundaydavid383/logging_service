@@ -63,10 +63,13 @@ celery -A fdq_commons.tasks.celery_app worker --pool=solo --loglevel=info -Q fdq
 celery -A fdq_commons.tasks.celery_app beat --loglevel=info
 
 # Terminal 4 — run any service (Django WSGI)
-python manage.py runserver 0.0.0.0:8001  # Activity Logging (8001)
-python manage.py runserver 0.0.0.0:8002  # Error Logging (8002)
-python manage.py runserver 0.0.0.0:8003  # Audit Trail (8003)
-python manage.py runserver 0.0.0.0:8004  # Notification Service (8004)
+FDQ_SERVICE_MODE=activity    python manage.py runserver 0.0.0.0:8001  # Activity Logging
+FDQ_SERVICE_MODE=error       python manage.py runserver 0.0.0.0:8002  # Error Logging
+FDQ_SERVICE_MODE=audit       python manage.py runserver 0.0.0.0:8003  # Audit Trail
+FDQ_SERVICE_MODE=notification python manage.py runserver 0.0.0.0:8004  # Notification Service
+
+# Gateway (port 8000) — runs in its own terminal
+FDQ_SERVICE_MODE=gateway python manage.py runserver 0.0.0.0:8000
 ```
 
 **Generate a test token:**

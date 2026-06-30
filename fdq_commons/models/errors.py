@@ -266,7 +266,6 @@ def generic_exception_handler_django(request: HttpRequest | None, exc: Exception
     import structlog
     trace_id = _get_active_trace_id(request)
     log = structlog.get_logger()
-    # path may not exist on arbitrary objects
     path = getattr(request, 'path', getattr(request, 'url', None))
     log.error(
         "unhandled_exception",
@@ -278,7 +277,8 @@ def generic_exception_handler_django(request: HttpRequest | None, exc: Exception
     return make_django_error_response(
         status_code=500,
         code=ErrorCode.INTERNAL_SERVER_ERROR,
-        message="An unexpected error occurred. The incident has been logged.",
+        message=f"{type(exc).__name__}: {str(exc)}",
+        details=[ErrorDetail(field="_debug", issue=type(exc).__name__, value=str(exc))],
         trace_id=trace_id,
     )
 

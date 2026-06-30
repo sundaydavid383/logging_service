@@ -22,6 +22,11 @@ class ErrorLoggingConfig(AppConfig):
     verbose_name = 'FDQ Error Logging Service'
 
     def ready(self) -> None:
+        from fdq_commons.service_mode import get_service_mode, get_expected_mode
+
+        if get_service_mode() != get_expected_mode(self.name):
+            return
+
         logger.info("Initializing Error Logging Service...")
 
         from fdq_commons.logging_setup import configure_logging

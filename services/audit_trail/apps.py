@@ -23,6 +23,11 @@ class AuditTrailConfig(AppConfig):
     verbose_name = 'FDQ Audit Trail Service'
 
     def ready(self) -> None:
+        from fdq_commons.service_mode import get_service_mode, get_expected_mode
+
+        if get_service_mode() != get_expected_mode(self.name):
+            return
+
         logger.info("Initializing Audit Trail Service...")
 
         from fdq_commons.logging_setup import configure_logging

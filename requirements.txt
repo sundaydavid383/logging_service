@@ -11,6 +11,7 @@ requests>=2.31.0
 # -- Django (for migration from FastAPI) --
 Django>=4.2,<5.0
 gunicorn>=22.0.0
+drf-spectacular>=0.27.0
 
 # -- Settings --
 pydantic>=2.7.0,<3.0.0

@@ -76,14 +76,13 @@ def _get_correlation_id_from_request(request: HttpRequest) -> str:
 # ============================================================================
 
 def _handle_fdq_exception(exc: FDQException) -> JsonResponse:
-    """Convert FDQException to Django JSON error response."""
     from fdq_commons.models.errors import ErrorEnvelope, ErrorBody
     
     error_body = ErrorBody(
-        code=exc.code,
-        message=exc.message,
-        details=[],
-        trace_id=exc.trace_id,
+        code=exc.fdq_code,
+        message=exc.fdq_message,
+        details=exc.fdq_details,
+        trace_id=exc.fdq_trace_id or str(uuid.uuid4()),
     )
     envelope = ErrorEnvelope(error=error_body)
     

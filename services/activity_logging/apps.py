@@ -26,10 +26,14 @@ class ActivityLoggingConfig(AppConfig):
 
     def ready(self) -> None:
         """
-        Called when Django app is ready. Initialize connection pools.
-        
-        This replaces the previous ASGI lifespan startup; AppConfig.ready() now handles startup.
+        Called when Django app is ready. Initialize connection pools only
+        when this process is running in "activity" mode (port 8001).
         """
+        from fdq_commons.service_mode import get_service_mode, get_expected_mode
+
+        if get_service_mode() != get_expected_mode(self.name):
+            return
+
         logger.info("Initializing Activity Logging Service...")
         
         # 1. Configure structured logging

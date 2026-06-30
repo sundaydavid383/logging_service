@@ -60,8 +60,8 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
 
     # Connection pool tuning (safe defaults; override per service if needed)
-    postgres_min_connections: int = 2
-    postgres_max_connections: int = 10
+    postgres_min_connections: int = 1
+    postgres_max_connections: int = 20
 
     # Statement timeout in milliseconds (0 = no timeout)
     postgres_statement_timeout_ms: int = 30_000
@@ -164,6 +164,27 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     swagger_ui_enabled: bool = False   # disabled in production per spec 10.4
     api_v1_prefix: str = "/api/v1"
+
+    # ------------------------------------------------------------------
+    # Service Runtime Mode
+    # ------------------------------------------------------------------
+    # Controls which URL routes this process registers.
+    # "gateway"   — acts as the API gateway on port 8000 (proxies downstream)
+    # "activity"  — downstream microservice on port 8001
+    # "error"     — downstream microservice on port 8002
+    # "audit"     — downstream microservice on port 8003
+    # "notification" — downstream microservice on port 8004
+    fdq_service_mode: str = "gateway"
+
+    # ------------------------------------------------------------------
+    # API Gateway Configuration
+    # ------------------------------------------------------------------
+    gateway_domain: str = "localhost:8000"
+    gateway_token_balance_limit: int = 1000
+    service_activity_logging_url: str = "http://localhost:8001"
+    service_error_logging_url: str = "http://localhost:8002"
+    service_audit_trail_url: str = "http://localhost:8003"
+    service_notification_service_url: str = "http://localhost:8004"
 
     # ------------------------------------------------------------------
     # Derived / computed validation properties

@@ -47,6 +47,10 @@ def _get_json_body(request: HttpRequest) -> dict[str, Any]:
         ) from exc
 
 
+# ============================================================================
+# Root dispatcher: Handle both GET and POST on /api/v1/error-logs
+# ============================================================================
+
 def _handle_fdq_exception(exc: FDQException) -> JsonResponse:
     from fdq_commons.models.errors import ErrorBody, ErrorEnvelope
 
@@ -59,6 +63,23 @@ def _handle_fdq_exception(exc: FDQException) -> JsonResponse:
         )
     )
     return JsonResponse(envelope.model_dump(mode='json'), status=exc.status_code)
+
+
+def error_logs_root(request: HttpRequest) -> JsonResponse:
+    """
+    Dispatcher for /api/v1/error-logs (POST and GET).
+
+    - POST: record a new error log (requires logs:write scope)
+    - GET:  list error logs with filters (requires logs:read scope)
+    """
+    if request.method == 'POST':
+        return record_error_log(request)
+    if request.method == 'GET':
+        return list_error_logs(request)
+    return JsonResponse(
+        {"error": {"code": "METHOD_NOT_ALLOWED", "message": f"Method {request.method} not allowed"}},
+        status=405,
+    )
 
 
 @require_http_methods(['POST'])
