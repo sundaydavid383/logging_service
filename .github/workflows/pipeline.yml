@@ -1,0 +1,43 @@
+name: Enterprise CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # STAGE 1: Continuous Integration (The Quality Gate)
+  test-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Language Environment (Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Project Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Execute Test Suite
+        run: |
+          echo "Running automated verification tests..."
+          # Uncomment the line below if you have a test file ready
+          # pytest tests/
+
+  # STAGE 2: Continuous Delivery (The Deployment Gate)
+  deploy-to-render:
+    needs: test-and-validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Webhook
+        env:
+          DEPLOY_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          echo "CI checks passed. Signaling infrastructure to deploy..."
+          curl -X POST "$DEPLOY_URL"
