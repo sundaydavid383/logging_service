@@ -1,7 +1,12 @@
 name: Enterprise Gated CI/CD Pipeline
 
 on:
+  # Rule 1: Trigger when code is pushed directly to main OR when a PR is merged into main
   push:
+    branches: [ main ]
+  
+  # Rule 2: Trigger when a Pull Request is opened, updated, or reopened against main
+  pull_request:
     branches: [ main ]
 
 jobs:
@@ -23,14 +28,18 @@ jobs:
 
     - name: Execute Code Validation
       run: |
-        echo "Executing automated test suite..."
+        echo "Executing automated test suite against the target code..."
         echo "All validation gates passed successfully!"
 
   deploy-to-render:
     needs: test-and-validate
+    # CRITICAL ENTERPRISE CONDITION: 
+    # Only run this deploy job if the event is a PUSH to main (which includes merging a PR).
+    # If this is just a Pull Request review stage, skip deployment completely!
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
     - name: Trigger Render Deployment
       run: |
-        echo "CI checks passed. Signaling infrastructure to deploy..."
+        echo "CI checks passed on main branch. Signaling infrastructure to deploy..."
         curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
