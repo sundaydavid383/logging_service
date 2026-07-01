@@ -202,4 +202,5 @@ fdq/
 
 - Python 3.14 breaks Celery 5.6 — use **3.12**
 - Worker requires `--pool=solo` (prefork fails on Windows)
-- If `celerybeat-schedule*` corrupts after sleep/restart, delete all `celerybeat-schedule*` files and restart beat
+- If `celerybeat-schedule*` corrupts after sleep/restart, delete all `celerybeat-schedule*` files and restart beat#   l o g g i n g _ s e r v i c e  
+ 
