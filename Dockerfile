@@ -21,8 +21,8 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # 6. Copy the rest of your Django code into the container
 COPY . /app/
 
-# 7. Expose the port your application will run on
-EXPOSE 8000
+# 7. FIX FOR WINDOWS: Give the script execution permissions inside the container
+RUN chmod +x /app/entrypoint.sh
 
-# 8. Start the Django development server
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# 8. Set the script as the gateway for the container lifecycle
+ENTRYPOINT ["/app/entrypoint.sh"]

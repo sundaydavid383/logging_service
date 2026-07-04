@@ -24,7 +24,11 @@ SECRET_KEY = os.environ.get(
 
 DEBUG = fdq_settings.is_development
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    '187.77.183.231',  # Production server IP provided by lead
+    'localhost',
+    '127.0.0.1',
+]
 
 INSTALLED_APPS = [
     # No django.contrib.admin — we don't use the ORM or admin panel
