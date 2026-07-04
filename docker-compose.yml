@@ -1,23 +1,37 @@
 version: "3.9"
 
 services:
+  # NEW: This links your Django application to the containers
+  web:
+    build: .
+    container_name: fdq_web_app
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DEBUG=False
+      - DATABASE_URL=postgres://fdq_user:fdq_password@postgres:5432/fdq_db
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
 
   postgres:
     image: postgres:16
     container_name: fdq_postgres
     restart: always
-
     environment:
       POSTGRES_USER: fdq_user
       POSTGRES_PASSWORD: fdq_password
       POSTGRES_DB: fdq_db
-
     ports:
       - "5432:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fdq_user -d fdq_db"]
       interval: 10s
