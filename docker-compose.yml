@@ -1,7 +1,6 @@
 version: "3.9"
 
 services:
-  # NEW: This links your Django application to the containers
   web:
     build: .
     container_name: fdq_web_app
@@ -13,10 +12,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    # 1. Pulls all 40+ config variables from your .env automatically
+    env_file:
+      - .env
+    # 2. Overrides the network hosts so they use container names instead of localhost
     environment:
-      - DEBUG=False
-      - DATABASE_URL=postgres://fdq_user:fdq_password@postgres:5432/fdq_db
-      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=production
+      - SWAGGER_UI_ENABLED=false
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
     volumes:
       - .:/app
 
